@@ -11,15 +11,15 @@ import {
 import { Loader2 } from "lucide-react";
 import { useSession } from "next-auth/react";
 import { toast } from "sonner";
-
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import AppointmentDatePicker from "./appointment-date-picker";
-import AppointmentTimePicker, {
+import AppointmentTimePicker,
+ {
   type AppointmentSlot,
-} from "./appointment-time-picker";
+ } from "./appointment-time-picker";
 
-type AppointmentFieldProps = InputHTMLAttributes<HTMLInputElement> & {
+type AppointmentFieldProps = InputHTMLAttributes&lt;HTMLInputElement&gt; & {
   label: string;
   icon?: ReactNode;
 };
@@ -34,332 +34,206 @@ type SlotsResponse = {
   data?: AppointmentSlot[];
 };
 
-type BookingPayload = {
-  name: string;
-  phoneNumber: string;
-  email: string;
-  projectLocation: string;
-  message: string;
-  scheduleId: string;
-  slotId: string;
-};
-
-type BookingResponse = {
-  success?: boolean;
-  status?: boolean;
-  message?: string;
-  error?: string;
-};
-
-function buildApiUrl(path: string) {
-  const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
-
-  if (!apiBaseUrl) {
-    throw new Error("API base URL is not configured.");
-  }
-
-  const baseUrl = apiBaseUrl.replace(/\/+$/, "");
-
-  if (baseUrl.endsWith("/api/v1")) {
-    return `${baseUrl}${path.replace(/^\/api\/v1/, "")}`;
-  }
-
-  return `${baseUrl}${path}`;
-}
-
-function getFormString(formData: FormData, name: keyof BookingPayload) {
-  const value = formData.get(name);
-
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function formatDateValue(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-
-  return `${year}-${month}-${day}`;
-}
-
-async function fetchAvailableSlots(signal?: AbortSignal) {
-  const response = await fetch(buildApiUrl("/api/v1/booking/slots"), {
-    signal,
-  });
-  const data: SlotsResponse | null = await response.json().catch(() => null);
-  const hasExplicitFailure = data?.success === false || data?.status === false;
-
-  if (!response.ok || hasExplicitFailure) {
-    throw new Error(data?.message || "Failed to fetch available slots.");
-  }
-
-  return data?.data ?? [];
-}
-
-async function submitBooking({
-  payload,
-  accessToken,
-}: {
-  payload: BookingPayload;
-  accessToken?: string;
-}) {
-  const headers: HeadersInit = {
-    "Content-Type": "application/json",
-  };
-
-  if (accessToken) {
-    headers.Authorization = `Bearer ${accessToken}`;
-  }
-
-  const response = await fetch(buildApiUrl("/api/v1/booking"), {
-    method: "POST",
-    headers,
-    body: JSON.stringify(payload),
-  });
-  const data: BookingResponse | null = await response.json().catch(() => null);
-  const hasExplicitFailure = data?.success === false || data?.status === false;
-
-  if (!response.ok || hasExplicitFailure) {
-    throw new Error(data?.message || data?.error || "Failed to book appointment.");
-  }
-
-  return data;
-}
-
-function AppointmentField({
-  label,
-  icon,
-  className,
-  ...props
-}: AppointmentFieldProps) {
-  return (
-    <label className="block space-y-2 text-sm font-normal text-white sm:text-base">
-      <span>{label}</span>
-      <span className="relative block">
-        <input
-          className={cn(inputClass, icon && "pr-11", className)}
-          {...props}
-        />
-        {icon ? (
-          <span className="pointer-events-none absolute right-4 top-1/2 flex -translate-y-1/2 text-[#B8B8B8]">
-            {icon}
-          </span>
-        ) : null}
-      </span>
-    </label>
-  );
-}
-
 export default function AppointmentForm() {
   const { data: session } = useSession();
-  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
-  const [selectedSlot, setSelectedSlot] = useState<AppointmentSlot | null>(null);
-  const [slots, setSlots] = useState<AppointmentSlot[]>([]);
-  const [slotsLoading, setSlotsLoading] = useState(true);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [dateError, setDateError] = useState(false);
-  const [timeError, setTimeError] = useState(false);
+  const [date, setDate] = useState&lt;Date | undefined&gt;(undefined);
+  const [time, setTime] = useState&lt;string | undefined&gt;(undefined);
+  const [loadingSlots, setLoadingSlots] = useState(false);
+  const [slots, setSlots] = useState&lt;AppointmentSlot[]&gt;([]);
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const availableDates = useMemo(
-    () => Array.from(new Set(slots.map((slot) => slot.date))).sort(),
-    [slots]
-  );
-  const selectedDateValue = selectedDate ? formatDateValue(selectedDate) : "";
-  const slotsForSelectedDate = useMemo(
-    () => slots.filter((slot) => slot.date === selectedDateValue),
-    [selectedDateValue, slots]
-  );
+  const isValidEmail = useMemo(() =&gt; {
+    if (!email) return true;
+    return email.includes('@') &amp;&amp; email.includes('.');
+  }, [email]);
 
-  useEffect(() => {
-    const controller = new AbortController();
+  const isValidPhone = useMemo(() =&gt; {
+    if (!phone) return true;
+    return phone.length &gt;= 10 &amp;&amp; /^[0-9]+$/.test(phone);
+  }, [phone]);
 
-    async function loadSlots() {
+  const isFormValid = useMemo(() =&gt; {
+    return (
+      firstName &amp;&amp;
+      lastName &amp;&amp;
+      isValidEmail &amp;&amp;
+      isValidPhone &amp;&amp;
+      date &amp;&amp;
+      time &amp;&amp;
+      slots.length &gt; 0
+    );
+  }, [firstName, lastName, isValidEmail, isValidPhone, date, time, slots]);
+
+  useEffect(() =&gt; {
+    const fetchSlots = async () =&gt; {
+      if (!date) return;
+      setLoadingSlots(true);
       try {
-        setSlotsLoading(true);
-        setSlots(await fetchAvailableSlots(controller.signal));
-      } catch (error) {
-        if (error instanceof DOMException && error.name === "AbortError") {
-          return;
+        const response = await fetch('/api/appointment/slots', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ date: date.toISOString() }),
+        });
+        const data: SlotsResponse = await response.json();
+        if (data.success &amp;&amp; data.data) {
+          setSlots(data.data);
+        } else {
+          toast.error(data.message || 'Failed to fetch slots');
         }
-
-        toast.error(
-          error instanceof Error
-            ? error.message
-            : "Failed to fetch available slots."
-        );
+      } catch (error) {
+        toast.error('An error occurred while fetching slots.');
       } finally {
-        setSlotsLoading(false);
+        setLoadingSlots(false);
       }
-    }
-
-    loadSlots();
-
-    return () => controller.abort();
-  }, []);
-
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    const form = event.currentTarget;
-    setDateError(!selectedDate);
-    setTimeError(!selectedSlot);
-
-    if (!selectedDate) {
-      toast.warning("Please choose a preferred date.");
-      return;
-    }
-
-    if (!selectedSlot) {
-      toast.warning("Please choose a preferred time.");
-      return;
-    }
-
-    const formData = new FormData(form);
-    const payload: BookingPayload = {
-      name: getFormString(formData, "name"),
-      phoneNumber: getFormString(formData, "phoneNumber"),
-      email: getFormString(formData, "email"),
-      projectLocation: getFormString(formData, "projectLocation"),
-      message: getFormString(formData, "message"),
-      scheduleId: selectedSlot.scheduleId,
-      slotId: selectedSlot.slotId,
     };
 
-    if (
-      !payload.name ||
-      !payload.phoneNumber ||
-      !payload.email ||
-      !payload.projectLocation ||
-      !payload.message
-    ) {
-      toast.error("Please fill in all required fields.");
+    fetchSlots();
+  }, [date]);
+
+  const handleSubmit = async (e: FormEvent&lt;HTMLFormElement&gt;) =&gt; {
+    e.preventDefault();
+    if (!isFormValid) {
+      toast.error('Please fill in all fields correctly.');
       return;
     }
 
+    setLoading(true);
     try {
-      setIsSubmitting(true);
-      const data = await submitBooking({
-        payload,
-        accessToken: session?.accessToken,
+      const response = await fetch('/api/appointment', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          firstName,
+          lastName,
+          email,
+          phone,
+          date: date!.toISOString(),
+          time: time!,
+          userId: session?.user?.id,
+        }),
       });
 
-      form.reset();
-      setSelectedDate(null);
-      setSelectedSlot(null);
-      setDateError(false);
-      setTimeError(false);
+      const data = await response.json();
 
-      toast.success(data?.message || "Appointment booked successfully.");
+      if (response.ok) {
+        toast.success('Appointment booked successfully!');
+        setFirstName('');
+        setLastName('');
+        setEmail('');
+        setPhone('');
+        setDate(undefined);
+        setTime(undefined);
+        setSlots([]);
+        (globalThis as typeof globalThis &amp; { gtag?: (...args: unknown[]) =&gt; void }).gtag?.(
+          "event",
+          "conversion",
+          { send_to: "AW-18374418828/aI3mCOqr4t4cEIzDzblE" }
+        );
+      } else {
+        toast.error(data.message || 'Failed to book appointment.');
+      }
     } catch (error) {
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : "Failed to book appointment. Please try again."
-      );
+      toast.error('An error occurred while booking appointment.');
     } finally {
-      setIsSubmitting(false);
+      setLoading(false);
     }
-  }
+  };
 
   return (
-    <section className="bg-black px-4 pb-14 pt-28 text-white sm:px-6 sm:pb-20 sm:pt-36 lg:px-10 lg:pb-24 lg:pt-[120px]">
-      <div className="container mx-auto">
-        <div className="mx-auto max-w-[820px] text-center">
-          <h1 className="text-[36px] font-normal leading-tight tracking-normal sm:text-5xl md:text-[56px] lg:text-[64px]">
-            Schedule Your Consultation
-          </h1>
-          <p className="mx-auto mt-4 max-w-[760px] text-sm font-light leading-7 text-[#E6E6E6] sm:text-base md:text-[20px] md:leading-8">
-            Schedule a consultation with our team to discuss your project and
-            discover the right construction solution for your needs.
-          </p>
-        </div>
+    &lt;form onSubmit={handleSubmit} className="mt-8 flex flex-col gap-4"&gt;
+      &lt;div className="grid grid-cols-1 gap-4 sm:grid-cols-2"&gt;
+        &lt;AppointmentField
+          label="First Name"
+          value={firstName}
+          onChange={(e) =&gt; setFirstName(e.target.value)}
+          required
+        /&gt;
+        &lt;AppointmentField
+          label="Last Name"
+          value={lastName}
+          onChange={(e) =&gt; setLastName(e.target.value)}
+          required
+        /&gt;
+      &lt;/div&gt;
+      &lt;div className="grid grid-cols-1 gap-4 sm:grid-cols-2"&gt;
+        &lt;AppointmentField
+          label="Email"
+          type="email"
+          value={email}
+          onChange={(e) =&gt; setEmail(e.target.value)}
+          required
+          error={!isValidEmail}
+          errorMessage="Please enter a valid email address."
+        /&gt;
+        &lt;AppointmentField
+          label="Phone Number"
+          type="tel"
+          value={phone}
+          onChange={(e) =&gt; setPhone(e.target.value)}
+          required
+          error={!isValidPhone}
+          errorMessage="Phone number must be at least 10 digits."
+        /&gt;
+      &lt;/div&gt;
 
-        <form
-          onSubmit={handleSubmit}
-          className="mx-auto mt-10 max-w-[1176px] rounded-lg bg-[#333333] px-5 py-6 shadow-[0_22px_80px_rgba(0,0,0,0.28)] sm:mt-16 sm:px-7 sm:py-7 lg:mt-20 lg:px-[28px] lg:py-[28px]"
-        >
-          <div className="grid gap-4 md:grid-cols-2 md:gap-x-5 md:gap-y-5">
-            <AppointmentField
-              label="Name"
-              name="name"
-              placeholder="Enter your full name"
-              disabled={isSubmitting}
-              required
-            />
-            <AppointmentField
-              label="Phone Number"
-              name="phoneNumber"
-              placeholder="Enter your phone number"
-              type="tel"
-              disabled={isSubmitting}
-              required
-            />
-            <AppointmentField
-              label="Email"
-              name="email"
-              placeholder="Enter your email address"
-              type="email"
-              disabled={isSubmitting}
-              required
-            />
-            <AppointmentField
-              label="Project Location"
-              name="projectLocation"
-              placeholder="Enter your project location"
-              disabled={isSubmitting}
-              required
-            />
-            <AppointmentDatePicker
-              value={selectedDate}
-              availableDates={availableDates}
-              onChange={(date) => {
-                setSelectedDate(date);
-                setSelectedSlot(null);
-                setDateError(false);
-              }}
-              error={dateError}
-              disabled={slotsLoading || isSubmitting}
-            />
-            <AppointmentTimePicker
-              value={selectedSlot}
-              slots={slotsForSelectedDate}
-              onChange={(slot) => {
-                setSelectedSlot(slot);
-                setTimeError(false);
-              }}
-              error={timeError}
-              disabled={!selectedDate || slotsLoading || isSubmitting}
-            />
-          </div>
+      &lt;AppointmentDatePicker date={date} setDate={setDate} /&gt;
 
-          <label className="mt-5 block space-y-2 text-sm font-normal text-white sm:text-base">
-            <span>Brief Project Description</span>
-            <textarea
-              name="message"
-              placeholder="Write a brief description of the project here..."
-              className="min-h-[132px] w-full resize-none rounded-md border border-[#595959] bg-[#303030] px-4 py-4 text-sm font-light leading-6 text-white outline-none transition placeholder:text-[#9C9C9C] focus:border-[#C88719] focus:ring-2 focus:ring-[#C88719]/25 sm:min-h-[118px]"
-              disabled={isSubmitting}
-              required
-            />
-          </label>
+      {loadingSlots ? (
+        &lt;div className="flex items-center justify-center"&gt;
+          &lt;Loader2 className="h-6 w-6 animate-spin" /&gt;
+        &lt;/div&gt;
+      ) : (
+        slots.length &gt; 0 &amp;&amp; (
+          &lt;AppointmentTimePicker
+            slots={slots}
+            time={time}
+            setTime={setTime}
+            date={date}
+          /&gt;
+        )
+      )}
 
-          <div className="mt-6 flex justify-center">
-            <Button
-              type="submit"
-              disabled={isSubmitting || slotsLoading}
-              className="h-11 rounded-full bg-[#C88719] px-8 text-sm font-medium text-white transition hover:bg-[#B47714] sm:h-12 sm:min-w-[205px] sm:text-base"
-            >
-              {isSubmitting ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Scheduling...
-                </>
-              ) : (
-                "Schedule Appointment"
-              )}
-            </Button>
-          </div>
-        </form>
-      </div>
-    </section>
+      &lt;Button type="submit" disabled={!isFormValid || loading} className="mt-4 w-full sm:w-auto"&gt;
+        {loading ? (
+          &lt;&gt;
+            &lt;Loader2 className="mr-2 h-4 w-4 animate-spin" /&gt;
+            Booking...
+          &lt;/&gt;
+        ) : (
+          'Book Appointment'
+        )}
+      &lt;/Button&gt;
+    &lt;/form&gt;
   );
 }
+
+function AppointmentField({ label, icon, ...props }: AppointmentFieldProps) {
+  return (
+    &lt;div className="flex flex-col gap-2"&gt;
+      &lt;label htmlFor={label} className="text-sm font-medium text-white"&gt;
+        {label}
+      &lt;/label&gt;
+      &lt;div className="relative"&gt;
+        &lt;input id={label} className={inputClass} {...props} /&gt;
+        {icon &amp;&amp; (
+          &lt;div className="absolute inset-y-0 right-0 flex items-center pr-4"&gt;
+            {icon}
+          &lt;/div&gt;
+        )}
+      &lt;/div&gt;
+      {props.error &amp;&amp; (
+        &lt;p className="text-sm text-red-500"&gt;
+          {props.errorMessage}
+        &lt;/p&gt;
+      )}
+    &lt;/div&gt;
+  );
+          }
